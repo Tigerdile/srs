@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 
 #####################################################################################
 # the main output dir, all configure and make output are in this dir.

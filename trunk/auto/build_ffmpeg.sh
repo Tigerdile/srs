@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# SDC - Let's use system ffmpeg
+mkdir -p ./objs/ffmpeg/bin
+touch ./objs/ffmpeg/bin/ffmpeg
+exit 0
+
 ff_src_dir="../../3rdparty"
 
 # the jobs to make ffmpeg
