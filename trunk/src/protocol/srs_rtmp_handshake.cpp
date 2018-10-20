@@ -111,18 +111,21 @@ namespace _srs_internal
             }
         } else {
             // use key-data to digest.
-            HMAC_CTX ctx;
+            HMAC_CTX* ctx;
             
+            ctx = HMAC_CTX_new();
+
             // @remark, if no key, use EVP_Digest to digest,
             // for instance, in python, hashlib.sha256(data).digest().
-            HMAC_CTX_init(&ctx);
-            if (HMAC_Init_ex(&ctx, temp_key, key_size, EVP_sha256(), NULL) < 0) {
+            if (HMAC_Init_ex(ctx, temp_key, key_size, EVP_sha256(), NULL) < 0) {
                 ret = ERROR_OpenSslSha256Init;
+                HMAC_CTX_free(ctx);
                 return ret;
             }
             
-            ret = do_openssl_HMACsha256(&ctx, data, data_size, temp_digest, &digest_size);
-            HMAC_CTX_cleanup(&ctx);
+            ret = do_openssl_HMACsha256(ctx, data, data_size, temp_digest, &digest_size);
+            HMAC_CTX_free(ctx);
+
             
             if (ret != ERROR_SUCCESS) {
                 return ret;
@@ -158,14 +161,6 @@ namespace _srs_internal
     void SrsDH::close()
     {
         if (pdh != NULL) {
-            if (pdh->p != NULL) {
-                BN_free(pdh->p);
-                pdh->p = NULL;
-            }
-            if (pdh->g != NULL) {
-                BN_free(pdh->g);
-                pdh->g = NULL;
-            }
             DH_free(pdh);
             pdh = NULL;
         }
@@ -181,7 +176,12 @@ namespace _srs_internal
             }
             
             if (ensure_128bytes_public_key) {
-                int32_t key_size = BN_num_bytes(pdh->pub_key);
+                const BIGNUM* pub_key;
+                const BIGNUM* priv_key;
+
+                DH_get0_key(pdh, &pub_key, &priv_key);
+
+                int32_t key_size = BN_num_bytes(pub_key);
                 if (key_size != 128) {
                     srs_warn("regenerate 128B key, current=%dB", key_size);
                     continue;
@@ -197,16 +197,20 @@ namespace _srs_internal
     int SrsDH::copy_public_key(char* pkey, int32_t& pkey_size)
     {
         int ret = ERROR_SUCCESS;
+        const BIGNUM* pub_key;
+        const BIGNUM* priv_key;
+
+        DH_get0_key(pdh, &pub_key, &priv_key);
         
         // copy public key to bytes.
         // sometimes, the key_size is 127, seems ok.
-        int32_t key_size = BN_num_bytes(pdh->pub_key);
+        int32_t key_size = BN_num_bytes(pub_key);
         srs_assert(key_size > 0);
         
         // maybe the key_size is 127, but dh will write all 128bytes pkey,
         // so, donot need to set/initialize the pkey.
         // @see https://github.com/ossrs/srs/issues/165
-        key_size = BN_bn2bin(pdh->pub_key, (unsigned char*)pkey);
+        key_size = BN_bn2bin(pub_key, (unsigned char*)pkey);
         srs_assert(key_size > 0);
         
         // output the size of public key.
@@ -265,33 +269,49 @@ namespace _srs_internal
         }
     
         //2. Create his internal p and g
-        if ((pdh->p = BN_new()) == NULL) {
+        BIGNUM* p = BN_new();
+
+        if (p == NULL) {
             ret = ERROR_OpenSslCreateP; 
+            DH_free(pdh);
             return ret;
         }
-        if ((pdh->g = BN_new()) == NULL) {
+
+        BIGNUM* g = BN_new();
+        if (g == NULL) {
             ret = ERROR_OpenSslCreateG; 
+            DH_free(pdh);
+            BN_free(p);
             return ret;
         }
     
         //3. initialize p and g, @see ./test/ectest.c:260
-        if (!BN_hex2bn(&pdh->p, RFC2409_PRIME_1024)) {
+        if (!BN_hex2bn(&p, RFC2409_PRIME_1024)) {
             ret = ERROR_OpenSslParseP1024; 
+            DH_free(pdh);
+            BN_free(p);
+            BN_free(g);
             return ret;
         }
         // @see ./test/bntest.c:1764
-        if (!BN_set_word(pdh->g, 2)) {
+        if (!BN_set_word(g, 2)) {
             ret = ERROR_OpenSslSetG;
+            DH_free(pdh);
+            BN_free(p);
+            BN_free(g);
             return ret;
         }
+
+        DH_set0_pqg(pdh, p, NULL, g);
     
         // 4. Set the key length
-        pdh->length = bits_count;
+        DH_set_length(pdh, bits_count);
     
         // 5. Generate private and public key
         // @see ./test/dhtest.c:152
         if (!DH_generate_key(pdh)) {
             ret = ERROR_OpenSslGenerateDHKeys;
+            DH_free(pdh);
             return ret;
         }
         
