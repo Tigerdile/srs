@@ -865,6 +865,10 @@ SrsRequest* SrsHttpMessage::to_request(string vhost)
     req->objectEncoding = 0;
     
     srs_discovery_tc_url(req->tcUrl, req->schema, req->host, req->vhost, req->app, req->stream, req->port, req->param);
+
+    // Put the correct param on
+    req->param = _uri->get_query();
+
     req->as_http();
     
     return req;

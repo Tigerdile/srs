@@ -480,12 +480,17 @@ int SrsLiveStream::update(SrsSource* s, SrsRequest* r)
 int SrsLiveStream::serve_http(ISrsHttpResponseWriter* w, ISrsHttpMessage* r)
 {
     int ret = ERROR_SUCCESS;
-    
-    if ((ret = http_hooks_on_play()) != ERROR_SUCCESS) {
+
+    SrsRequest* user_req = ((SrsHttpMessage*)r)->to_request(req->vhost);
+
+    if ((ret = http_hooks_on_play(user_req)) != ERROR_SUCCESS) {
+        delete user_req;
         srs_error("http hook on_play failed. ret=%d", ret);
         return ret;
     }
-    
+
+    delete user_req;
+
     ret = do_serve_http(w, r);
     
     http_hooks_on_stop();
@@ -636,7 +641,7 @@ int SrsLiveStream::do_serve_http(ISrsHttpResponseWriter* w, ISrsHttpMessage* r)
     return ret;
 }
 
-int SrsLiveStream::http_hooks_on_play()
+int SrsLiveStream::http_hooks_on_play(SrsRequest* user_req)
 {
     int ret = ERROR_SUCCESS;
     
@@ -644,7 +649,7 @@ int SrsLiveStream::http_hooks_on_play()
     if (!_srs_config->get_vhost_http_hooks_enabled(req->vhost)) {
         return ret;
     }
-    
+
     // the http hooks will cause context switch,
     // so we must copy all hooks for the on_connect may freed.
     // @see https://github.com/ossrs/srs/issues/475
@@ -663,7 +668,7 @@ int SrsLiveStream::http_hooks_on_play()
     
     for (int i = 0; i < (int)hooks.size(); i++) {
         std::string url = hooks.at(i);
-        if ((ret = SrsHttpHooks::on_play(url, req)) != ERROR_SUCCESS) {
+        if ((ret = SrsHttpHooks::on_play(url, user_req)) != ERROR_SUCCESS) {
             srs_error("hook client on_play failed. url=%s, ret=%d", url.c_str(), ret);
             return ret;
         }
